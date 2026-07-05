@@ -795,7 +795,7 @@ def build_pdf_report(plant, condition, confidence, recommendation_text, language
 st.sidebar.title(" Navigation")
 app_mode = st.sidebar.radio(
     "Select a page",
-    ["Home", "About", "Disease Recognition", "AI Agronomist Chat"],
+    ["Home", "About", "Disease Recognition"],
     label_visibility="collapsed"
 )
 
@@ -1222,188 +1222,27 @@ elif app_mode == "Disease Recognition":
 
 
 # ----------------------------------------------------------------------------
-# AI Agronomist Chat Helper Functions & Page
+# Floating Chatbot Widget Injection
 # ----------------------------------------------------------------------------
-def find_remedies_context(user_query):
-    """Scans user query for keywords matching remedies.py database."""
-    try:
-        from remedies import REMEDIES
-    except ImportError:
-        return ""
-        
-    matched_entries = []
-    query_lower = user_query.lower()
+import streamlit.components.v1 as components
+
+# We use the connection token for the plant disease RAG knowledge base.
+widget_html = """
+<script>
+  const parentDoc = window.parent.document;
+  if (!parentDoc.getElementById('anshubot-script-loaded')) {
+    // Set global config variables in parent window
+    window.parent.ANSHUBOT_TOKEN = 'd32417fc-68a7-40e0-9209-3fbdb2a9f3b3';
+    window.parent.ANSHUBOT_BASE_URL = 'http://localhost:8090';
+    window.parent.ANSHUBOT_BOT_NAME = 'KrishiSetu AI';
     
-    for key, data in REMEDIES.items():
-        # key format is like "Apple___Apple_scab" or "Apple___healthy"
-        parts = key.replace("___", " ").replace("_", " ").lower().split()
-        match_count = 0
-        for part in parts:
-            if len(part) > 2 and part in query_lower:
-                match_count += 1
-                
-        if match_count >= 1:
-            remedy_text = f"Plant/Disease: {key.replace('___', ' - ').replace('_', ' ')}\n"
-            remedy_text += f"Summary: {data.get('summary', '')}\n"
-            if data.get('organic'):
-                remedy_text += "Organic Treatments:\n- " + "\n- ".join(data['organic']) + "\n"
-            if data.get('chemical'):
-                remedy_text += "Chemical Treatments:\n- " + "\n- ".join(data['chemical']) + "\n"
-            if data.get('prevention'):
-                remedy_text += "Prevention Tips:\n- " + "\n- ".join(data['prevention']) + "\n"
-            matched_entries.append(remedy_text)
-            
-    if matched_entries:
-        return "\n---\n".join(matched_entries[:3])
-    return ""
-
-
-def format_chat_prompt(prompt, history, context):
-    """Formats the system instructions, local grounding context, and history into a prompt."""
-    system_instruction = """You are an expert AI Agronomist and farming specialist.
-Your goal is to help users with plant disease diagnosis, treatment, agricultural best practices, crop care, soil health, and pre-crop raising precautions.
-Provide friendly, actionable, and scientifically accurate advice.
-
-If the user's question relates to a disease or plant present in the provided context, prioritize using that context for treatment instructions.
-Otherwise, use your extensive general knowledge of farming to explain the causes, treatments, or practices.
+    // Create script tag and load the floating widget
+    const script = parentDoc.createElement('script');
+    script.id = 'anshubot-script-loaded';
+    script.src = 'http://localhost:8090/widget/anshubot-widget.js';
+    parentDoc.body.appendChild(script);
+    console.log("KrishiSetu AI Chatbot widget successfully injected into parent DOM.");
+  }
+</script>
 """
-    if context:
-        system_instruction += f"\nHere is some verified local reference data to ground your answer:\n{context}\n"
-        
-    prompt_with_history = system_instruction + "\n--- Conversation History ---\n"
-    for role, msg in history:
-        prompt_with_history += f"{role}: {msg}\n"
-    prompt_with_history += f"User: {prompt}\nAI:"
-    return prompt_with_history
-
-
-def ask_gemini_chatbot(prompt, history, context):
-    """Calls Gemini to answer the user query."""
-    client = get_gemini_client()
-    if not client:
-        return "Gemini API client is not initialized. Please verify your GEMINI_API_KEY."
-        
-    prompt_with_history = format_chat_prompt(prompt, history, context)
-    try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL_NAME,
-            contents=prompt_with_history,
-        )
-        return (response.text or "").strip()
-    except Exception as e:
-        return f"Error from Gemini API: {e}"
-
-
-def ask_ollama_chatbot(prompt, history, context, model_name="llama3.2:latest"):
-    """Calls local Ollama to answer the user query."""
-    prompt_with_history = format_chat_prompt(prompt, history, context)
-    url = "http://localhost:11434/api/generate"
-    payload = {
-        "model": model_name,
-        "prompt": prompt_with_history,
-        "stream": False
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=30)
-        if response.status_code == 200:
-            return response.json().get("response", "").strip()
-        else:
-            return f"Ollama returned status code {response.status_code}: {response.text}"
-    except Exception as e:
-        return f"Could not connect to local Ollama instance on http://localhost:11434. Ensure Ollama is running. Error: {e}"
-
-
-def get_ollama_models():
-    """Fetches local Ollama models list."""
-    try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=3)
-        if response.status_code == 200:
-            models = response.json().get("models", [])
-            return [m["name"] for m in models]
-    except Exception:
-        pass
-    return ["llama3.2:latest", "llama3:latest", "gemma2:latest", "mistral:latest"]
-
-
-if app_mode == "AI Agronomist Chat":
-    st.title(" AI Agronomist Chat")
-    st.caption("Interact with an expert agricultural AI to diagnose leaf issues, learn crop care, and discover cures.")
-    st.markdown("<div class='section-divider'></div>", unsafe_allow_html=True)
-    
-    # Init chat history
-    if "agronomist_messages" not in st.session_state:
-        st.session_state.agronomist_messages = []
-        
-    # Sidebar config options for the chatbot
-    st.sidebar.markdown("**Chatbot Configuration**")
-    model_source = st.sidebar.selectbox("Model Source", ["Gemini API", "Local Ollama"])
-    
-    selected_ollama_model = "llama3.2:latest"
-    if model_source == "Local Ollama":
-        available_models = get_ollama_models()
-        selected_ollama_model = st.sidebar.selectbox("Ollama Model", available_models)
-        
-    if st.sidebar.button("🗑️ Clear Chat History"):
-        st.session_state.agronomist_messages = []
-        st.rerun()
-        
-    # Render starter prompt pills/suggestions if history is empty
-    if not st.session_state.agronomist_messages:
-        st.write("### Ask a question to get started:")
-        
-        col1, col2 = st.columns(2)
-        starters = [
-            "My mango fruit has red dots, what can be the cause?",
-            "How do I grow a perfect Banana?",
-            "What precautions should I take before crop raise?",
-            "Organic remedies for Apple Scab"
-        ]
-        
-        for idx, starter in enumerate(starters):
-            col = col1 if idx % 2 == 0 else col2
-            if col.button(starter, use_container_width=True):
-                # Save user message
-                st.session_state.agronomist_messages.append({"role": "user", "content": starter})
-                # Call LLM
-                context = find_remedies_context(starter)
-                history = [(msg["role"], msg["content"]) for msg in st.session_state.agronomist_messages[:-1]]
-                
-                with st.spinner("AI Agronomist is thinking..."):
-                    if model_source == "Gemini API":
-                        response_text = ask_gemini_chatbot(starter, history, context)
-                    else:
-                        response_text = ask_ollama_chatbot(starter, history, context, selected_ollama_model)
-                        
-                st.session_state.agronomist_messages.append({"role": "assistant", "content": response_text})
-                st.rerun()
-                
-    # Display chat history
-    for message in st.session_state.agronomist_messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            
-    # Handle user input
-    user_input = st.chat_input("Ask about farming, leaves, or cures...")
-    if user_input:
-        # Display user message in chat message container
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        # Add user message to chat history
-        st.session_state.agronomist_messages.append({"role": "user", "content": user_input})
-        
-        # Grounding context search
-        context = find_remedies_context(user_input)
-        history = [(msg["role"], msg["content"]) for msg in st.session_state.agronomist_messages[:-1]]
-        
-        with st.spinner("AI Agronomist is thinking..."):
-            if model_source == "Gemini API":
-                response_text = ask_gemini_chatbot(user_input, history, context)
-            else:
-                response_text = ask_ollama_chatbot(user_input, history, context, selected_ollama_model)
-                
-        # Display assistant response in chat message container
-        with st.chat_message("assistant"):
-            st.markdown(response_text)
-        # Add assistant response to chat history
-        st.session_state.agronomist_messages.append({"role": "assistant", "content": response_text})
-        st.rerun()
+components.html(widget_html, height=0, width=0)
