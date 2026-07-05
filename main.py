@@ -1232,7 +1232,7 @@ widget_html = """
   const parentDoc = window.parent.document;
   if (!parentDoc.getElementById('anshubot-script-loaded')) {
     // Set global config variables in parent window
-    window.parent.ANSHUBOT_TOKEN = 'd32417fc-68a7-40e0-9209-3fbdb2a9f3b3';
+    window.parent.ANSHUBOT_TOKEN = 'd3ceb389-4aa1-4c0f-ad12-2ea2fcedf972';
     window.parent.ANSHUBOT_BASE_URL = 'http://localhost:8090';
     window.parent.ANSHUBOT_BOT_NAME = 'KrishiSetu AI';
     

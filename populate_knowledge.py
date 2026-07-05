@@ -1,5 +1,20 @@
 import psycopg2
+import requests
 from remedies import REMEDIES
+
+def get_embedding(text):
+    try:
+        r = requests.post("http://localhost:11434/api/embeddings", json={
+            "model": "nomic-embed-text",
+            "prompt": text
+        }, timeout=15)
+        if r.status_code == 200:
+            embedding = r.json().get("embedding")
+            if embedding:
+                return "[" + ",".join(map(str, embedding)) + "]"
+    except Exception as e:
+        pass
+    return None
 
 def populate():
     # Connect to the PostgreSQL database
@@ -20,6 +35,7 @@ def populate():
     # 1. Custom Farming Guides to insert
     guides = [
         {
+            "title": "Mango Fruit Red Dots Cause & Cure",
             "content": (
                 "Farming Guide: Mango Fruit Red Dots. Red dots or spots on mango fruits are commonly caused by Anthracnose "
                 "(a fungal infection caused by Colletotrichum gloeosporioides) or bacterial black spot. Symptoms start as "
@@ -30,6 +46,7 @@ def populate():
             )
         },
         {
+            "title": "Growing Perfect Bananas Guide",
             "content": (
                 "Farming Guide: How to Grow Perfect Bananas. Bananas are heavy feeders requiring warm weather, rich, well-draining soil, "
                 "constant moisture, and shelter from wind. 1. Soil: Ideal pH is 5.5 - 6.5. Mix organic compost or manure heavily into the "
@@ -39,6 +56,7 @@ def populate():
             )
         },
         {
+            "title": "Precautions Before Crop Raising",
             "content": (
                 "Farming Guide: Precautions Before Crop Raising. 1. Soil Testing: Always test the soil pH and nutrient levels beforehand "
                 "to prepare target amendments. 2. Seed Selection: Choose certified, disease-resistant seeds/varieties. 3. Tillage: Till the "
@@ -65,34 +83,46 @@ def populate():
         if prevention:
             content += f"Prevention: {prevention}."
 
-        guides.append({"content": content})
+        guides.append({"title": f"Treatment Guide - {title}", "content": content})
 
-    # Insert each unique guide/remedy
+    # Target Website connection ID 3 (KrishiSetu AI)
+    website_connection_id = 3
+
+    # Clean old metadata for website_connection_id = 3 to avoid duplicates or mismatch
+    cursor.execute("DELETE FROM website_metadata WHERE website_connection_id = %s", (website_connection_id,))
+    
+    print("Generating embeddings and inserting knowledge chunks...")
     inserted = 0
-    for guide in guides:
+    for idx, guide in enumerate(guides):
         content = guide["content"]
-        # Check if it already exists
+        title = guide["title"]
+        
+        # Try to generate embedding
+        embedding = get_embedding(content)
+        if not embedding:
+            print(f"Skipping embedding for chunk {idx+1}/{len(guides)}: nomic-embed-text not running or failed.")
+            continue
+            
+        # Insert into website_metadata (for the widget chat RAG)
+        cursor.execute(
+            """
+            INSERT INTO website_metadata (content, content_type, created_at, embedding, title, url, website_connection_id)
+            VALUES (%s, %s, now(), %s, %s, %s, %s)
+            """,
+            (content, "GENERAL", embedding, title, "http://localhost:8501", website_connection_id)
+        )
+        
+        # Also ensure it exists in general knowledge_chunk
         cursor.execute("SELECT id FROM knowledge_chunk WHERE content = %s", (content,))
         row = cursor.fetchone()
         if not row:
-            cursor.execute("INSERT INTO knowledge_chunk (content, embedding) VALUES (%s, NULL)", (content,))
-            inserted += 1
+            cursor.execute("INSERT INTO knowledge_chunk (content, embedding) VALUES (%s, %s)", (content, embedding))
+            
+        inserted += 1
 
     conn.commit()
-    print(f"Successfully checked all entries. Inserted {inserted} new farming knowledge chunks into 'knowledge_chunk' table.")
+    print(f"Successfully processed and seeded {inserted} knowledge chunks into website_metadata (connection ID {website_connection_id}) and knowledge_chunk table with vector embeddings.")
     
-    # Trigger a re-indexing in Spring Boot if we added new chunks
-    if inserted > 0:
-        import requests
-        try:
-            r = requests.post("http://localhost:8090/api/knowledge/reindex", timeout=10)
-            if r.status_code == 200:
-                print("Triggered Spring Boot manual re-indexing successfully.")
-            else:
-                print(f"Could not trigger re-indexing automatically: {r.status_code}")
-        except Exception as e:
-            print(f"Could not connect to Spring Boot re-indexing API: {e}")
-
     cursor.close()
     conn.close()
 
