@@ -1233,13 +1233,13 @@ widget_html = """
   if (!parentDoc.getElementById('anshubot-script-loaded')) {
     // Set global config variables in parent window
     window.parent.ANSHUBOT_TOKEN = 'd3ceb389-4aa1-4c0f-ad12-2ea2fcedf972';
-    window.parent.ANSHUBOT_BASE_URL = 'http://localhost:8090';
+    window.parent.ANSHUBOT_BASE_URL = 'http://89.116.121.52:8090/';
     window.parent.ANSHUBOT_BOT_NAME = 'KrishiSetu AI';
     
     // Create script tag and load the floating widget
     const script = parentDoc.createElement('script');
     script.id = 'anshubot-script-loaded';
-    script.src = 'http://localhost:8090/widget/anshubot-widget.js';
+    script.src = 'http://89.116.121.52:8090/widget/anshubot-widget.js';
     parentDoc.body.appendChild(script);
     console.log("KrishiSetu AI Chatbot widget successfully injected into parent DOM.");
   }
